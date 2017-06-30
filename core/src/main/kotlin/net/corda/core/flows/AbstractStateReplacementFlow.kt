@@ -13,6 +13,7 @@ import net.corda.core.transactions.WireTransaction
 import net.corda.core.utilities.ProgressTracker
 import net.corda.core.utilities.UntrustworthyData
 import net.corda.core.utilities.unwrap
+import net.corda.flows.SendTransactionFlow
 import java.security.PublicKey
 
 /**
@@ -107,8 +108,9 @@ abstract class AbstractStateReplacementFlow {
         @Suspendable
         private fun getParticipantSignature(party: Party, stx: SignedTransaction): DigitalSignature.WithKey {
             val proposal = Proposal(originalState.ref, modification, stx)
-            val response = sendAndReceive<DigitalSignature.WithKey>(party, proposal)
-            return response.unwrap {
+            // SendTransactionFlow allows otherParty to access our data to resolve the transaction.
+            subFlow(SendTransactionFlow(party, proposal))
+            return receive<DigitalSignature.WithKey>(party).unwrap {
                 check(party.owningKey.isFulfilledBy(it.by)) { "Not signed by the required participant" }
                 it.verify(stx.id)
                 it

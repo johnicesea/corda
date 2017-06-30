@@ -34,6 +34,9 @@ UNRELEASED
 * Moved the core flows previously found in ``net.corda.flows`` into ``net.corda.core.flows``. This is so that all packages
   in the ``core`` module begin with ``net.corda.core``.
 
+* Data Vending service has been removed in this release to enhance data security. CorDapp developers should use the new
+  ``SendTransactionFlow`` in the flow logic to allow data access from their corresponding counter-flow.
+
 Milestone 13
 ------------
 

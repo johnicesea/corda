@@ -10,6 +10,7 @@ import net.corda.core.transactions.SignedTransaction
 import net.corda.core.transactions.WireTransaction
 import net.corda.core.utilities.ProgressTracker
 import net.corda.core.utilities.unwrap
+import net.corda.flows.AnonymisedIdentity
 import java.security.PublicKey
 
 /**
@@ -58,10 +59,9 @@ import java.security.PublicKey
  * @param partiallySignedTx Transaction to collect the remaining signatures for
  */
 // TODO: AbstractStateReplacementFlow needs updating to use this flow.
-// TODO: Update this flow to handle randomly generated keys when that works is complete.
 class CollectSignaturesFlow(val partiallySignedTx: SignedTransaction,
-                            override val progressTracker: ProgressTracker = CollectSignaturesFlow.tracker()): FlowLogic<SignedTransaction>() {
-
+                            val identities: Map<Party, AnonymisedIdentity>,
+                            override val progressTracker: ProgressTracker = CollectSignaturesFlow.tracker()) : FlowLogic<SignedTransaction>() {
     companion object {
         object COLLECTING : ProgressTracker.Step("Collecting signatures from counter-parties.")
         object VERIFYING : ProgressTracker.Step("Verifying collected signatures.")

@@ -55,7 +55,7 @@ class TraderDemoClientApi(val rpc: CordaRPCOps) {
         val amounts = calculateRandomlySizedAmounts(amount, 3, 10, Random())
         // issuer random amounts of currency totaling 30000.DOLLARS in parallel
         val resultFutures = amounts.map { pennies ->
-            rpc.startFlow(::IssuanceRequester, Amount(pennies, amount.token), me.legalIdentity, OpaqueBytes.of(1), bankOfCordaParty, notaryNode.notaryIdentity, true).returnValue
+            rpc.startFlow(::IssuanceRequester, Amount(pennies, amount.token), me.legalIdentity, OpaqueBytes.of(1), bankOfCordaParty, notaryNode.notaryIdentity).returnValue
         }
 
         Futures.allAsList(resultFutures).getOrThrow()

@@ -440,13 +440,18 @@ object FlowCookbook {
             -----------------------**/
             progressTracker.currentStep = SIGS_GATHERING
 
+            // TODO: Use actual anonymous identities
+            val identities = listOf(serviceHub.myInfo.legalIdentityAndCert, serviceHub.identityService.certificateFromParty(counterparty)!!)
+                    .map { node ->
+                        Pair(node.party, node.toAnonymisedIdentity())
+                    }.toMap()
             // The list of parties who need to sign a transaction is dictated
             // by the transaction's commands. Once we've signed a transaction
             // ourselves, we can automatically gather the signatures of the
             // other required signers using ``CollectSignaturesFlow``.
             // The responder flow will need to call ``SignTransactionFlow``.
             // DOCSTART 15
-            val fullySignedTx: SignedTransaction = subFlow(CollectSignaturesFlow(twiceSignedTx, SIGS_GATHERING.childProgressTracker()))
+            val fullySignedTx: SignedTransaction = subFlow(CollectSignaturesFlow(twiceSignedTx, identities, SIGS_GATHERING.childProgressTracker()))
             // DOCEND 15
 
             /**-----------------------

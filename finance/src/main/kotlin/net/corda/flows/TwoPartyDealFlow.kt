@@ -28,9 +28,14 @@ import java.security.PublicKey
 // TODO: Also, the term Deal is used here where we might prefer Agreement.
 // TODO: Make this flow more generic.
 object TwoPartyDealFlow {
-    // This object is serialised to the network and is the first flow message the seller sends to the buyer.
+    /**
+     * This object is serialised to the network and is the first flow message the seller sends to the buyer.
+     *
+     * @param primaryIdentity the (anonymised) identity of the primary/initiating party.
+     * @param secondaryIdentity the (anonymised) identity of the secondary/receiving party.
+     */
     @CordaSerializable
-    data class Handshake<out T>(val payload: T, val publicKey: PublicKey)
+    data class Handshake<out T>(val payload: T, val primaryIdentity: AnonymisedIdentity, val secondaryIdentity: AnonymisedIdentity)
 
     /**
      * Abstracted bilateral deal flow participant that initiates communication/handshake.
@@ -38,19 +43,28 @@ object TwoPartyDealFlow {
     abstract class Primary(override val progressTracker: ProgressTracker = Primary.tracker()) : FlowLogic<SignedTransaction>() {
 
         companion object {
+            object GENERATING_ID : ProgressTracker.Step("Generating anonymous identities")
             object SENDING_PROPOSAL : ProgressTracker.Step("Handshaking and awaiting transaction proposal.")
-            fun tracker() = ProgressTracker(SENDING_PROPOSAL)
+            fun tracker() = ProgressTracker(GENERATING_ID, SENDING_PROPOSAL)
         }
 
         abstract val payload: Any
         abstract val notaryNode: NodeInfo
         abstract val otherParty: Party
-        abstract val myKey: PublicKey
+        abstract val anonymous: Boolean
 
         @Suspendable override fun call(): SignedTransaction {
+            progressTracker.currentStep = GENERATING_ID
+            val txIdentities = if (anonymous) {
+                subFlow(TransactionKeyFlow(otherParty))
+            } else {
+                emptyMap<Party, AnonymisedIdentity>()
+            }
+            val anonymousMe = txIdentities.get(serviceHub.myInfo.legalIdentity) ?: serviceHub.myInfo.legalIdentityAndCert.toAnonymisedIdentity()
+            val anonymousCounterparty = txIdentities.get(otherParty) ?: serviceHub.identityService.certificateFromParty(otherParty)!!.toAnonymisedIdentity()
             progressTracker.currentStep = SENDING_PROPOSAL
             // Make the first message we'll send to kick off the flow.
-            val hello = Handshake(payload, serviceHub.myInfo.legalIdentity.owningKey)
+            val hello = Handshake(payload, anonymousMe, anonymousCounterparty)
             // Wait for the FinalityFlow to finish on the other side and return the tx when it's available.
             send(otherParty, hello)
 
@@ -100,7 +114,11 @@ object TwoPartyDealFlow {
             progressTracker.currentStep = COLLECTING_SIGNATURES
 
             // DOCSTART 1
-            val stx = subFlow(CollectSignaturesFlow(ptx))
+            // TODO: Use actual anonymised identities, not fake ones derived from the well known identity
+            val myAnonymisedIdentity = handshake.secondaryIdentity
+            val theirAnonymisedIdentity = handshake.primaryIdentity
+            val identities: Map<Party, AnonymisedIdentity> = listOf(Pair(serviceHub.myInfo.legalIdentity, myAnonymisedIdentity), Pair(otherParty, theirAnonymisedIdentity)).toMap()
+            val stx = subFlow(CollectSignaturesFlow(ptx, identities))
             // DOCEND 1
 
             logger.trace { "Got signatures from other party, verifying ... " }
@@ -133,7 +151,12 @@ object TwoPartyDealFlow {
             val handshake = receive<Handshake<U>>(otherParty)
 
             progressTracker.currentStep = VERIFYING
-            return handshake.unwrap { validateHandshake(it) }
+            return handshake.unwrap {
+                // Verify the contained identities by passing them to the identity service to store
+                serviceHub.identityService.verifyAnonymousIdentity(it.primaryIdentity.identity, otherParty, it.primaryIdentity.certPath)
+                serviceHub.identityService.verifyAnonymousIdentity(it.secondaryIdentity.identity, serviceHub.myInfo.legalIdentity, it.secondaryIdentity.certPath)
+                validateHandshake(it)
+            }
         }
 
         private fun signWithOurKeys(signingPubKeys: List<PublicKey>, ptx: TransactionBuilder): SignedTransaction {
@@ -153,7 +176,7 @@ object TwoPartyDealFlow {
      */
     open class Instigator(override val otherParty: Party,
                           override val payload: AutoOffer,
-                          override val myKey: PublicKey,
+                          override val anonymous: Boolean,
                           override val progressTracker: ProgressTracker = Primary.tracker()) : Primary() {
 
         override val notaryNode: NodeInfo get() =

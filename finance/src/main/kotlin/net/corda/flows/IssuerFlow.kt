@@ -47,13 +47,15 @@ object IssuerFlow {
         override fun call(): AbstractCashFlow.Result {
             val issueRequest = IssuanceRequestState(amount, issueToParty, issueToPartyRef, notaryParty, anonymous)
             return sendAndReceive<AbstractCashFlow.Result>(issuerBankParty, issueRequest).unwrap { res ->
+                val anonymousRecipient = res.recipient!!
+                require(serviceHub.identityService.partyFromAnonymous(anonymousRecipient) == serviceHub.myInfo.legalIdentity)
                 val tx = res.stx.tx
                 val expectedAmount = Amount(amount.quantity, Issued(issuerBankParty.ref(issueToPartyRef), amount.token))
                 val cashOutputs = tx.outputs
                         .map { it.data}
                         .filterIsInstance<Cash.State>()
                         .filter { state -> state.owner == res.recipient }
-                require(cashOutputs.size == 1) { "Require a single cash output paying ${res.recipient}, found ${tx.outputs}" }
+                require(cashOutputs.size == 1) { "Require a single cash output paying ${anonymousRecipient}, found ${tx.outputs}" }
                 require(cashOutputs.single().amount == expectedAmount) { "Require payment of $expectedAmount"}
                 res
             }
@@ -64,6 +66,7 @@ object IssuerFlow {
      * Issuer refers to a Node acting as a Bank Issuer of [FungibleAsset], and processes requests from a [IssuanceRequester] client.
      * Returns the generated transaction representing the transfer of the [Issued] [FungibleAsset] to the issue requester.
      */
+    // TOOD: Remove initiated by, we shouldn't allowing nodes to make arbitrary issuance requests
     @InitiatedBy(IssuanceRequester::class)
     class Issuer(val otherParty: Party) : FlowLogic<SignedTransaction>() {
         companion object {

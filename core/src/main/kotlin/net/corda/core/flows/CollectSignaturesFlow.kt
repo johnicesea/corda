@@ -72,16 +72,14 @@ class CollectSignaturesFlow(val partiallySignedTx: SignedTransaction,
     }
 
     @Suspendable override fun call(): SignedTransaction {
-        // TODO: Revisit when key management is properly fleshed out.
-        // This will break if a party uses anything other than their legalIdentityKey.
         // Check the signatures which have already been provided and that the transaction is valid.
         // Usually just the Initiator and possibly an oracle would have signed at this point.
-        val myKey = serviceHub.myInfo.legalIdentity.owningKey
         val signed = partiallySignedTx.sigs.map { it.by }
         val notSigned = partiallySignedTx.tx.mustSign - signed
 
         // One of the signatures collected so far MUST be from the initiator of this flow.
-        require(partiallySignedTx.sigs.any { it.by == myKey }) {
+        // TODO: We might want to take in the list of our keys, and verify against the KMS, rather than filtering the signers
+        require(serviceHub.keyManagementService.filterMyKeys(partiallySignedTx.sigs.map { it.by }).toList().isNotEmpty()) {
             "The Initiator of CollectSignaturesFlow must have signed the transaction."
         }
 
@@ -217,7 +215,9 @@ abstract class SignTransactionFlow(val otherParty: Party,
     }
 
     @Suspendable private fun checkSignatures(stx: SignedTransaction) {
-        require(stx.sigs.any { it.by == otherParty.owningKey }) {
+        // Refuse to sign anything where we don't know all of the parties involved
+        val signingIdentities = stx.sigs.map { serviceHub.identityService.partyFromKey(it.by) }.requireNoNulls()
+        require(signingIdentities.any { it == otherParty }) {
             "The Initiator of CollectSignaturesFlow must have signed the transaction."
         }
         val signed = stx.sigs.map { it.by }

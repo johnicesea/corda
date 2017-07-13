@@ -136,7 +136,9 @@ object TwoPartyTradeFlow {
             // Put together a proposed transaction that performs the trade, and sign it.
             progressTracker.currentStep = SIGNING
             val (ptx, cashSigningPubKeys) = assembleSharedTX(tradeRequest)
-            val partSignedTx = signWithOurKeys(cashSigningPubKeys, ptx)
+            // FIXME: Send the relevant identities over to the counterparty
+            // Now sign the transaction with whatever keys we need to move the cash.
+            val partSignedTx = serviceHub.signInitialTransaction(ptx, cashSigningPubKeys)
 
             // Send the signed transaction to the seller, who must then sign it themselves and commit
             // it to the ledger by sending it to the notary.
@@ -170,11 +172,6 @@ object TwoPartyTradeFlow {
 
                 return it
             }
-        }
-
-        private fun signWithOurKeys(cashSigningPubKeys: List<PublicKey>, ptx: TransactionBuilder): SignedTransaction {
-            // Now sign the transaction with whatever keys we need to move the cash.
-            return serviceHub.signInitialTransaction(ptx, cashSigningPubKeys)
         }
 
         @Suspendable

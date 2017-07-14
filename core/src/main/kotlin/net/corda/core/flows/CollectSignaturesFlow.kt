@@ -5,6 +5,7 @@ import net.corda.core.crypto.DigitalSignature
 import net.corda.core.crypto.isFulfilledBy
 import net.corda.core.crypto.toBase58String
 import net.corda.core.identity.Party
+import net.corda.core.identity.PartyAndCertificate
 import net.corda.core.node.ServiceHub
 import net.corda.core.transactions.SignedTransaction
 import net.corda.core.transactions.WireTransaction
@@ -61,9 +62,10 @@ import java.security.PublicKey
 // TODO: AbstractStateReplacementFlow needs updating to use this flow.
 class CollectSignaturesFlow(val partiallySignedTx: SignedTransaction,
                             val identities: Map<Party, AnonymisedIdentity>,
+                            val myKeys: Set<PublicKey>,
                             override val progressTracker: ProgressTracker = CollectSignaturesFlow.tracker()) : FlowLogic<SignedTransaction>() {
     companion object {
-        object COLLECTING : ProgressTracker.Step("Collecting signatures from counter-parties.")
+        object COLLECTING : ProgressTracker.Step("Collecting signatures from counterparties.")
         object VERIFYING : ProgressTracker.Step("Verifying collected signatures.")
 
         fun tracker() = ProgressTracker(COLLECTING, VERIFYING)
@@ -72,14 +74,15 @@ class CollectSignaturesFlow(val partiallySignedTx: SignedTransaction,
     }
 
     @Suspendable override fun call(): SignedTransaction {
+        val myIdentities: List<PartyAndCertificate> = myKeys.map { serviceHub.identityService.certificateFromParty(serviceHub.identityService.partyFromKey(it)!!) }.requireNoNulls()
+
         // Check the signatures which have already been provided and that the transaction is valid.
         // Usually just the Initiator and possibly an oracle would have signed at this point.
         val signed = partiallySignedTx.sigs.map { it.by }
         val notSigned = partiallySignedTx.tx.mustSign - signed
 
         // One of the signatures collected so far MUST be from the initiator of this flow.
-        // TODO: We might want to take in the list of our keys, and verify against the KMS, rather than filtering the signers
-        require(serviceHub.keyManagementService.filterMyKeys(partiallySignedTx.sigs.map { it.by }).toList().isNotEmpty()) {
+        require(partiallySignedTx.sigs.any { it.by == myKeys }) {
             "The Initiator of CollectSignaturesFlow must have signed the transaction."
         }
 
@@ -98,7 +101,7 @@ class CollectSignaturesFlow(val partiallySignedTx: SignedTransaction,
         if (unsigned.isEmpty()) return partiallySignedTx
 
         // Collect signatures from all counter-parties and append them to the partially signed transaction.
-        val counterpartySignatures = keysToParties(unsigned).map { collectSignature(it) }
+        val counterpartySignatures = keysToParties(unsigned).map { collectSignature(it, myIdentities) }
         val stx = partiallySignedTx + counterpartySignatures
 
         // Verify all but the notary's signature if the transaction requires a notary, otherwise verify all signatures.
@@ -122,8 +125,8 @@ class CollectSignaturesFlow(val partiallySignedTx: SignedTransaction,
     /**
      * Get and check the required signature.
      */
-    @Suspendable private fun collectSignature(counterparty: Party): DigitalSignature.WithKey {
-        return sendAndReceive<DigitalSignature.WithKey>(counterparty, partiallySignedTx).unwrap {
+    @Suspendable private fun collectSignature(counterparty: Party, myIdentities: List<PartyAndCertificate>): DigitalSignature.WithKey {
+        return sendAndReceive<DigitalSignature.WithKey>(counterparty, Pair(partiallySignedTx, myIdentities)).unwrap {
             require(counterparty.owningKey.isFulfilledBy(it.by)) { "Not signed by the required Party." }
             it
         }
@@ -183,8 +186,11 @@ abstract class SignTransactionFlow(val otherParty: Party,
 
     @Suspendable override fun call(): SignedTransaction {
         progressTracker.currentStep = RECEIVING
-        val checkedProposal = receive<SignedTransaction>(otherParty).unwrap { proposal ->
+        val checkedProposal = receive<Pair<SignedTransaction, List<PartyAndCertificate>>>(otherParty).unwrap { (proposal, additionalIdentities) ->
             progressTracker.currentStep = VERIFYING
+            // Register the additonal identities
+            // TODO: Should this be register anonymous identity?
+            additionalIdentities.forEach { serviceHub.identityService.registerIdentity(it) }
             // Check that the Responder actually needs to sign.
             checkMySignatureRequired(proposal)
             // Check the signatures which have already been provided. Usually the Initiators and possibly an Oracle's.

@@ -13,7 +13,6 @@ import net.corda.core.transactions.WireTransaction
 import net.corda.core.utilities.ProgressTracker
 import net.corda.core.utilities.UntrustworthyData
 import net.corda.core.utilities.unwrap
-import net.corda.flows.SendTransactionFlow
 import java.security.PublicKey
 
 /**

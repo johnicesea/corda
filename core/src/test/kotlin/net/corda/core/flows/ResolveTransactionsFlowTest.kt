@@ -9,7 +9,6 @@ import net.corda.core.utilities.opaque
 import net.corda.core.transactions.LedgerTransaction
 import net.corda.core.transactions.SignedTransaction
 import net.corda.testing.DUMMY_NOTARY_KEY
-import net.corda.flows.SendTransactionFlow
 import net.corda.node.utilities.transaction
 import net.corda.testing.MEGA_CORP
 import net.corda.testing.MEGA_CORP_KEY

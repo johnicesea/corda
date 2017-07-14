@@ -17,7 +17,7 @@ import net.corda.core.node.services.vault.QueryCriteria
 import net.corda.core.serialization.CordaSerializable
 import net.corda.core.transactions.SignedTransaction
 import net.corda.core.utilities.unwrap
-import net.corda.flows.SendTransactionFlow
+import net.corda.core.flows.SendTransactionFlow
 import java.util.*
 
 @CordaSerializable

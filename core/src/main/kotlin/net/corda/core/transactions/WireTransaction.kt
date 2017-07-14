@@ -30,10 +30,11 @@ data class WireTransaction(
         override val notary: Party?,
         override val type: TransactionType,
         override val timeWindow: TimeWindow?
-) : BaseWireTransaction, TraversableTransaction {
+) : CoreTransaction, TraversableTransaction {
     init {
         if (notary == null) check(inputs.isEmpty()) { "The notary must be specified explicitly for any transaction that has inputs" }
         if (timeWindow != null) check(notary != null) { "If a time-window is provided, there must be a notary" }
+        checkNoDuplicateInputs()
     }
 
     override val id: SecureHash get() = merkleTree.hash

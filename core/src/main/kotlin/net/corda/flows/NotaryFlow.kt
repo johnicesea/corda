@@ -57,7 +57,7 @@ object NotaryFlow {
 
             try {
                 if (stx.isNotaryChangeTransaction()) {
-                    stx.resolveNotaryChangeTransaction(serviceHub).verifySignatures(stx.sigs, notaryParty.owningKey)
+                    stx.resolveNotaryChangeTransaction(serviceHub).verifySignatures(notaryParty.owningKey)
                 } else {
                     stx.verifySignatures(notaryParty.owningKey)
                 }

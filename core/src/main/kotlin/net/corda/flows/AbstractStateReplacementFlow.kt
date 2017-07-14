@@ -184,7 +184,7 @@ abstract class AbstractStateReplacementFlow {
             val finalTx = stx + allSignatures
             // TODO: abstract this check away
             if (finalTx.isNotaryChangeTransaction()) {
-                finalTx.resolveNotaryChangeTransaction(serviceHub).verifySignatures(finalTx.sigs)
+                finalTx.resolveNotaryChangeTransaction(serviceHub).verifySignatures()
             } else finalTx.verifySignatures()
             serviceHub.recordTransactions(finalTx)
         }

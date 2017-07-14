@@ -3,7 +3,6 @@ package net.corda.core.transactions
 import net.corda.core.contracts.*
 import net.corda.core.crypto.DigitalSignature
 import net.corda.core.crypto.SecureHash
-import net.corda.core.crypto.isFulfilledBy
 import net.corda.core.getOrThrow
 import net.corda.core.identity.Party
 import net.corda.core.node.ServiceHub
@@ -26,8 +25,9 @@ import java.util.*
  * sign.
  */
 // DOCSTART 1
-data class SignedTransaction(private val transaction: BaseWireTransaction,
-                             val sigs: List<DigitalSignature.WithKey>) : NamedByHash {
+data class SignedTransaction(private val transaction: CoreTransaction,
+                             override val sigs: List<DigitalSignature.WithKey>
+) : TransactionWithSignatures, CoreTransaction {
     // DOCEND 1
     init {
         require(sigs.isNotEmpty()) { "Tried to instantiate a ${SignedTransaction::class.java.simpleName} without any signatures " }
@@ -40,81 +40,31 @@ data class SignedTransaction(private val transaction: BaseWireTransaction,
      */
     override val id: SecureHash get() = transaction.id
 
-    /** Returns the underlying [WireTransaction] */
+    /** Returns the contained [WireTransaction], or throws if this is a notary change transaction */
     val tx: WireTransaction get() = transaction as WireTransaction
 
-    /** Returns the underlying [NotaryChangeWireTransaction] */
+    /** Returns the contained [NotaryChangeWireTransaction], or throws if this is a normal transaction */
     val ntx: NotaryChangeWireTransaction get() = transaction as NotaryChangeWireTransaction
 
-    val inputs: List<StateRef> get() = transaction.inputs
-    val notary: Party? get() = transaction.notary
+    override val inputs: List<StateRef> get() = transaction.inputs
+    override val notary: Party? get() = transaction.notary
 
-    /**
-     * Verifies the signatures on this transaction and throws if any are missing which aren't passed as parameters.
-     * In this context, "verifying" means checking they are valid signatures and that their public keys are in
-     * the contained transactions [BaseTransaction.mustSign] property.
-     *
-     * Normally you would not provide any keys to this function, but if you're in the process of building a partial
-     * transaction and you want to access the contents before you've signed it, you can specify your own keys here
-     * to bypass that check.
-     *
-     * @throws SignatureException if any signatures are invalid or unrecognised.
-     * @throws SignaturesMissingException if any signatures should have been present but were not.
-     */
-    // DOCSTART 2
-    @Throws(SignatureException::class)
-    fun verifySignatures(vararg allowedToBeMissing: PublicKey): WireTransaction {
-        // DOCEND 2
-        // Embedded WireTransaction is not deserialised until after we check the signatures.
-        checkSignaturesAreValid()
-
-        val missing = getMissingSignatures()
-        if (missing.isNotEmpty()) {
-            val allowed = allowedToBeMissing.toSet()
-            val needed = missing - allowed
-            if (needed.isNotEmpty())
-                throw SignaturesMissingException(needed, getMissingKeyDescriptions(needed), id)
-        }
-        return tx
-    }
-
-    /**
-     * Mathematically validates the signatures that are present on this transaction. This does not imply that
-     * the signatures are by the right keys, or that there are sufficient signatures, just that they aren't
-     * corrupt. If you use this function directly you'll need to do the other checks yourself. Probably you
-     * want [verifySignatures] instead.
-     *
-     * @throws SignatureException if a signature fails to verify.
-     */
-    @Throws(SignatureException::class)
-    fun checkSignaturesAreValid() {
-        for (sig in sigs) {
-            sig.verify(id.bytes)
-        }
-    }
-
-    private fun getMissingSignatures(): Set<PublicKey> {
-        val sigKeys = sigs.map { it.by }.toSet()
-        // TODO Problem is that we can get single PublicKey wrapped as CompositeKey in allowedToBeMissing/mustSign
-        //  equals on CompositeKey won't catch this case (do we want to single PublicKey be equal to the same key wrapped in CompositeKey with threshold 1?)
-        val missing = tx.requiredSigningKeys.filter { !it.isFulfilledBy(sigKeys) }.toSet()
-        return missing
-    }
+    override val requiredSigningKeys: Set<PublicKey> get() = tx.requiredSigningKeys
 
     /**
      * Get a human readable description of where signatures are required from, and are missing, to assist in debugging
      * the underlying cause.
      */
-    private fun getMissingKeyDescriptions(missing: Set<PublicKey>): ArrayList<String> {
+    override fun getKeyDescriptions(keys: Set<PublicKey>): ArrayList<String> {
         // TODO: We need a much better way of structuring this data
-        val missingElements = ArrayList<String>()
+        val descriptions = ArrayList<String>()
         this.tx.commands.forEach { command ->
-            if (command.signers.any { it in missing })
-                missingElements.add(command.toString())
+            if (command.signers.any { it in keys })
+                descriptions.add(command.toString())
         }
-        if (this.tx.notary?.owningKey in missing)
-            missingElements.add("notary")
-        return missingElements
+        if (this.tx.notary?.owningKey in keys)
+            descriptions.add("notary")
+        return descriptions
     }
 
     /** Returns the same transaction but with an additional (unchecked) signature. */
@@ -182,24 +132,24 @@ data class SignedTransaction(private val transaction: BaseWireTransaction,
 
     private fun verifyNotaryChangeTransaction(checkSufficientSignatures: Boolean, services: ServiceHub) {
         val ntx = resolveNotaryChangeTransaction(services)
-        if (checkSufficientSignatures) ntx.verifySignatures(sigs)
+        if (checkSufficientSignatures) ntx.verifySignatures()
     }
 
     fun isNotaryChangeTransaction() = transaction is NotaryChangeWireTransaction
 
+    /**
+     * If [transaction] is a [NotaryChangeWireTransaction], loads the input states and resolves it to a
+     * [NotaryChangeLedgerTransaction] so the signatures can be verified.
+     */
     fun resolveNotaryChangeTransaction(services: ServiceHub): NotaryChangeLedgerTransaction {
         val ntx = transaction as? NotaryChangeWireTransaction
                 ?: throw IllegalStateException("Expected a ${NotaryChangeWireTransaction::class.simpleName} but found ${transaction::class.simpleName}")
-
-        return ntx.resolve(services)
+        return ntx.resolve(services, sigs)
     }
 
     override fun toString(): String = "${javaClass.simpleName}(id=$id)"
 
     @CordaSerializable
-    class SignaturesMissingException(val missing: Set<PublicKey>, val descriptions: List<String>, override val id: SecureHash) : NamedByHash, SignatureException() {
-        override fun toString(): String {
-            return "Missing signatures for $descriptions on transaction ${id.prefixChars()} for ${missing.joinToString()}"
-        }
-    }
+    class SignaturesMissingException(val missing: Set<PublicKey>, val descriptions: List<String>, override val id: SecureHash)
+        : NamedByHash, SignatureException("Missing signatures for $descriptions on transaction ${id.prefixChars()} for ${missing.joinToString()}")
 }
